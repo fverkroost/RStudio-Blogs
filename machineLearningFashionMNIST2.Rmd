@@ -1,0 +1,196 @@
+---
+title: "A comparison of methods for predicting clothing classes using the Fashion MNIST dataset in RStudio and Python (Part 2)"
+author: "Florianne Verkroost"
+date: "23/08/2019"
+output: html_document
+---
+
+```{r setup,  echo = FALSE, message = FALSE, warning = FALSE, results = 'hide'}
+python3_path <- "/Library/Frameworks/Python.framework/Versions/3.7/bin/python3"
+knitr::opts_chunk$set(echo = TRUE, engine.path = list(python = python3_path))
+library(reticulate)    # run Python in R
+library(devtools)
+library(tensorflow)    # backend for keras
+install_tensorflow()
+library(keras)         # obtaining the data
+install_keras()        
+library(reshape2)      # melting data into long format
+library(plyr)          # data manipulation
+library(dplyr)         # data manipulation
+library(fpc)           # cluster validation statistics
+library(ggplot2)       # visualize and plot
+library(rpart)         # run single tree models
+library(randomForest)  # run random forest models
+library(gbm)           # run boosting models
+library(e1071)         # run support vector machines
+library(caret)         # calculate variable importance
+use_python(python3_path)
+matplotlib <- import("matplotlib")
+matplotlib$use("Agg", force = TRUE)
+set.seed(1234)
+```
+
+In this series of blog posts, I will compare different machine and deep learning methods to predict clothing categories from images using the Fashion MNIST data. In the [first blog post](https://github.com/fverkroost/RStudio-Blogs/blob/master/machineLearningFashionMNIST1.Rmd) of the series, we will explore and prepare the data for analysis. I will also show you how to perform K-means clustering as an exploratory analysis, to get an idea of what categories are more similar and dissimilar and thus more or less likely to be misclassified. In this second blog post, I will show you how to predict the clothing categories of the Fashion MNIST data using my go-to model: an artificial neural network. Here, I will also show you how to use one of RStudios incredible features to run Python from RStudio. In the [third blog post](https://github.com/fverkroost/RStudio-Blogs/blob/master/machineLearningFashionMNIST3.Rmd), we will experiment with tree-based methods (single tree, random forests and boosting) and support vector machines to see whether we can beat the neural network in terms of performance. 
+
+## Neural Network
+
+Now, let's continue by building a simple neural network model to predict our clothing categories. Neural networks are artificial computing systems that were built with human neural networks in mind. Neural networks contain nodes, which transmit signals amongst one another. Usually the input at each node is a number, which is transformed according to a non-linear function of the input and weights, the latter being the parameters that are tuned while training the model. Sets of neurons are collected in different layers; neural networks are reffered to as 'deep' when they contain at least two hidden layers. 
+
+Although neural networks can easily built in RStudio using Tensorflow and Keras, I really want to show you one of the incredible features of RStudio where you can run Python in RStudio. This can be done in two ways: either we choose "Terminal" on the top of the output console in RStudio and run Python via Terminal, or we use the base *system2* function to run Python in RStudio. 
+
+```{r eval = FALSE}
+python_file <- "simple_neural_network_fashion_mnist.py"
+system2("python3", args = c(python_file), stdout = NULL, stderr = "")
+```
+
+I will now guide you step by step through the script called in the command above. First, we load the required packages in Python and we load and prepare the data.
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3', message = FALSE, warning = FALSE, results = 'hide'}
+# Load required packages
+import tensorflow as tf
+from tensorflow import keras
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Flatten
+import numpy as np
+import matplotlib.pyplot as plt
+import keras
+from keras.applications import VGG19
+from keras.applications.vgg19 import preprocess_input
+from keras.models import Model
+from keras import models
+from keras import layers
+from keras import optimizers
+
+# Load the train and test images and label from the Fashion MNIST data from keras
+fashion_mnist = keras.datasets.fashion_mnist
+(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
+
+# Normalize the data by dividing by maximum opacity of 255
+train_images = train_images / 255.0
+test_images = test_images / 255.0
+```
+
+We start by building a simple neural network containing one hidden layer. Note that as here we use the untransformed but normalized data, we need to flatten the 28 by 28 pixels input first. After building the neural network, we compile it by specifying a loss function suitable for categorical multi-class responses, an optimizer and our metric of interest. Hereafter, we can train the model onto our training data set.
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3', message = FALSE, warning = FALSE, results = 'hide'}
+# Develop a model with three layers (input layer, hidden layer and output layer)
+three_layer_model = Sequential()
+three_layer_model.add(Flatten(input_shape = (28, 28)))
+three_layer_model.add(Dense(128, activation = 'relu'))
+three_layer_model.add(Dense(10, activation = 'softmax'))
+
+# Compile and fit the model onto the training data
+three_layer_model.compile(loss = 'sparse_categorical_crossentropy', 
+                          optimizer = 'adam', metrics = ['accuracy'])
+three_layer_model.fit(train_images, train_labels, epochs = 5, validation_split = 0.3)
+```
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3'}
+# Compute the accuracy and loss of model performance on the test data
+test_loss, test_acc = three_layer_model.evaluate(test_images, test_labels)
+print("Model with three layers and five epochs -- Test loss:", test_loss * 100)
+print("Model with three layers and five epochs -- Test accuracy:", test_acc * 100)
+```
+
+We can see that the neural network with one hidden layer already performs relatively well compared to the tree-based methods we've seen before, with a test set accuracy of 87 percent. To see whether a deep neural network performs better at predicting clothing categories, we build a neural network with three hidden layers in a similar way as before.
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3', message = FALSE, warning = FALSE, results = 'hide'}
+# Develop a model with five layers (input layer, five hidden layers and output layer)
+five_layer_model = Sequential()
+five_layer_model.add(Flatten(input_shape = (28, 28)))
+five_layer_model.add(Dense(128, activation = 'relu'))
+five_layer_model.add(Dense(128, activation = 'relu'))
+five_layer_model.add(Dense(128, activation = 'relu'))
+five_layer_model.add(Dense(10, activation = 'softmax'))
+
+# Compile and fit the model onto the training data
+five_layer_model.compile(loss = 'sparse_categorical_crossentropy', 
+                         optimizer = 'adam', metrics = ['accuracy'])
+five_layer_model.fit(train_images, train_labels, epochs = 5, validation_split = 0.3)
+```
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3'}
+# Compute the accuracy and loss of model performance on the test data
+test_loss, test_acc = five_layer_model.evaluate(test_images, test_labels)
+print("Model with five layers and five epochs -- Test loss:", test_loss * 100)
+print("Model with five layers and five epochs -- Test accuracy:", test_acc * 100)
+```
+The model with two additional hidden layers performs slightly better and has lower loss than the model with one hidden layer. Let's try whether adding another five hidden layers improves model performance even more.
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3', message = FALSE, warning = FALSE, results = 'hide'}
+# Develop a model with ten layers (input layer, eight hidden layers and output layer)
+ten_layer_model = Sequential()
+ten_layer_model.add(Flatten(input_shape = (28, 28)))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(128, activation = 'relu'))
+ten_layer_model.add(Dense(10, activation = 'softmax'))
+
+# Compile and fit the model onto the training data
+ten_layer_model.compile(loss = 'sparse_categorical_crossentropy', 
+                        optimizer = 'adam', metrics = ['accuracy'])
+ten_layer_model.fit(train_images, train_labels, epochs = 5, validation_split = 0.3)
+```
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3'}
+# Compute the accuracy and loss of model performance on the test data
+test_loss, test_acc = ten_layer_model.evaluate(test_images, test_labels)
+print("Model with ten layers and five epochs -- Test loss:", test_loss * 100)
+print("Model with ten layers and five epochs -- Test accuracy:", test_acc * 100)
+```
+
+Clearly, of the neural networks developed here, the one with three hidden layers works best. The deeper model with eight hidden layers seems to hardly improve accuracy while increasing loss. Let's try and see whether increasing the number of epochs (i.e. the number of times the model iterates through the training data) from five to fifty.
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3', message = FALSE, warning = FALSE, results = 'hide'}
+# Rerun the five layer model but now with 50 instead of 5 epochs
+five_layer_model_50_epochs = five_layer_model.fit(train_images, train_labels, 
+                                                  epochs = 50, validation_split = 0.3)
+```
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3'}
+# Compute the accuracy and loss of model performance on the test data
+test_loss, test_acc = five_layer_model.evaluate(test_images, test_labels)
+print("Model with five layers and fifty epochs -- Test loss:", test_loss * 100)
+print("Model with five layers and fifty epochs -- Test accuracy:", test_acc * 100)
+```
+
+The five-layer model trained with fifty epochs has slightly higher accuracy than the same model trained with five epochs, but alsmost twice as much loss, while also being less time efficient. The predictions returned are probabilities per class. We can calculate the majority vote by taking class that has the maximum of predicted probabilities of all classes.
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3', message = FALSE, warning = FALSE, results = 'hide'}
+# Compute the predictions from the five layer model with 50 epochs
+predictions = five_layer_model.predict(test_images)
+majority_vote = dict()
+for i in range(len(predictions)):
+  majority_vote[i] = np.argmax(predictions[i])
+```
+
+We just saw that increasing the number of epochs from five to fifty slightly improved performance while substantially increasing loss. Therefore, we plot model loss and accuracy over the number of epochs for the training and cross-validation data to understand the trade-off between minimizing loss and maximizing accuracy.
+
+```{python, engine.path = '/Library/Frameworks/Python.framework/Versions/3.7/bin/python3'}
+# Plot accuracy and loss as functions of epochs
+plt.subplot(1, 2, 1)
+plt.plot(five_layer_model_50_epochs.history['val_loss'], 'blue')
+plt.plot(five_layer_model_50_epochs.history['loss'], 'red')
+plt.legend(['Cross-validation data', 'Training data'], loc = 'upper left')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.title('Model loss and accuracy over epochs for a five-layer neural network')
+
+plt.subplot(1, 2, 2)
+plt.plot(five_layer_model_50_epochs.history['val_acc'], 'blue')
+plt.plot(five_layer_model_50_epochs.history['acc'], 'red')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.subplots_adjust(wspace = .35)
+
+plt.show()
+```
+
+We observe that for the training data, loss decreases to zero while accuracy increases to one, as a result of overfitting (i.e. the model is fitted too well to a particular data set and therefore does not well extend to other data sets). This is why we also check how the model performs on the cross-validation data, for which we observe that both loss and accuracy increase with the number of epochs. Looking at the cross-validation data accuracy, we see that the peak lays at 0.896 for 18 epochs, and that for these number of epochs the loss is 0.382, which is much lower than for fifty epochs.
+
+## Next up...
+Next up in this series of blog posts, I will experiment with tree-based methods and support vector machines to see if they perform as well as the neural network in predicting clothing categories in the Fashion MNIST data. [Let's go!](https://github.com/fverkroost/RStudio-Blogs/blob/master/machineLearningFashionMNIST3.Rmd)
