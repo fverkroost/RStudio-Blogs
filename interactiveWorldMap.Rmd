@@ -81,7 +81,7 @@ world_data <- fortify(world_data)
 head(world_data)
 ```
 
-To map our data, we need to merge the childlessness, gender gap index and world map data. As said before, these all have different notations for country names, which is why we'll use the ISO3 codes. However, even between the ISO code data and the other data sets, there is discrepancy in country names. Unfortunately, to solve this, we need to manually change some country names in our data to match those in the ISO code data set. The code for doing so is long and tedious, so I won't show that here, but for your reference you can find it [here](https://www.google.com).
+To map our data, we need to merge the childlessness, gender gap index and world map data. As said before, these all have different notations for country names, which is why we'll use the ISO3 codes. However, even between the ISO code data and the other data sets, there is discrepancy in country names. Unfortunately, to solve this, we need to manually change some country names in our data to match those in the ISO code data set. The code for doing so is long and tedious, so I won't show that here, but for your reference you can find it in the source code of this RMarkdown file on my Github page [here](https://github.com/fverkroost/RStudio-Blogs/blob/master/interactiveWorldMap.Rmd).
 
 ```{r, echo = FALSE}
 childlessness_data$Country[childlessness_data$Country == "Bolivia (Plurinational State of)"] <- "Bolivia"
