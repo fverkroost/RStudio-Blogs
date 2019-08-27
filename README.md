@@ -1,2 +1,2 @@
 # RStudio-Blogs
-This repository contains code I have written to produce RMarkdown files for my RStudio blogs.
+This repository contains the code required to produce blogs for RStudio. Each blog post has its own RMarkdown file, and all required files referred to in these posts are also included in this repository.
