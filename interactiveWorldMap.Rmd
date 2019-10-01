@@ -1,0 +1,279 @@
+---
+title: "Building interactive world maps in R Shiny"
+author: "Florianne Verkroost"
+date: "8/23/2019"
+output: html_document
+runtime: shiny
+---
+
+In this blog, I will show you how to create interactive world maps and how to show these in the form of an R Shiny app. To show you how to adapt the interface of the app to the choices of the users, we'll make use of two data sources such that the user can choose what data they want to explore and that the app adapts the possible input choices to the users' previous choices. The data sources here are about childlessness and gender inequality, which is the focus of my research. We'll start by loading and cleaning the data, whereafter we will build our interactive world maps in R Shiny. Let's first load the required packages into RStudio.
+
+```{r setup, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing, exploring and cleaning the data
+
+Now, we can continue with loading our data. As we'll make world maps, we need a way to map our data sets to geographical data containing coordinates (longitude and latitude). As different data sets have different formats for country names (e.g. "United Kingdom of Great Britain and Northern Ireland" versus "United Kingdom"), we'll match country names to ISO3 codes to easily merge all data sets later on. Therefore, we first scrape an HTML table of country names, ISO3, ISO2 and UN codes for all countries worldwide. We use the *rvest* package using the XPath to indicate what part of the web page contains our table of interest. We use the pipeline (%>%) from the *magrittr* package to feed our URL of interest into functions that read the HTML table using the XPath and convert that to a data frame in R. One can obtain the XPath by hovering over the HTML table in developer mode on the browser and having show the XPath. The first element in the resulting list contains our table of interest, and as the first column is empty, we delete it. Also, as you can see from the HTML table in the link, there are some rows that show the letter of the alphabet before starting with a list of countries of which the name starts with that letter. As these rows contain the particular letter in all columns, we can delete these by deleting all rows for which all columns have equal values.
+
+```{r, warning = FALSE, message = FALSE}
+library(magrittr)
+library(rvest)
+url <- "https://www.nationsonline.org/oneworld/country_code_list.htm"
+iso_codes <- url %>%
+  read_html() %>%
+  html_nodes(xpath = '//*[@id="CountryCode"]') %>%
+  html_table()
+iso_codes <- iso_codes[[1]][, -1]
+iso_codes <- iso_codes[!apply(iso_codes, 1, function(x){all(x == x[1])}), ]
+names(iso_codes) <- c("Country", "ISO2", "ISO3", "UN")
+head(iso_codes)
+```
+Next, we'll collect our first data set, which is a data set on childlessness provided by the United Nations. We download the file from the link, save it locally and then load it into RStudio using the *read_excel()* function in the *readxl* package.
+
+```{r, results = FALSE, message = FALSE}
+library(readxl)
+url <- "https://www.un.org/en/development/desa/population/publications/dataset/fertility/wfr2012/Data/Data_Sources/TABLE%20A.8.%20%20Percentage%20of%20childless%20women%20and%20women%20with%20parity%20three%20or%20higher.xlsx"
+destfile <- "dataset_childlessness.xlsx"
+download.file(url, destfile)
+childlessness_data <- read_excel(destfile)
+```
+```{r}
+head(childlessness_data)
+```
+
+We can see that the childlessness data are a bit messy, especially when it comes to the first couple of rows and column names. We only want to maintain the columns that have country names, periods and childlessness estimates for different age groups, as well as the rows that refer to data for specific countries. The resulting data look much better. Note that when we'll convert the childlessness percentage columns to numeric type later on, the ".." values will automatically change to NA.
+
+```{r}
+cols <- which(grepl("childless", childlessness_data[2, ]))
+childlessness_data <- childlessness_data[-c(1:3), c(1, 3, cols:(cols + 2))]
+names(childlessness_data) <- c("Country", "Period", "35-39", "40-44", "45-49")
+head(childlessness_data)
+```
+
+Our second data set is about measures of gender inequality, provided by the World Bank. We read this .csv file directly into RStudio from the URL link.
+
+```{r}
+gender_index_data <- read.csv("https://s3.amazonaws.com/datascope-ast-datasets-nov29/datasets/743/data.csv")
+head(gender_index_data)
+```
+Luckily, these data are better structured than the childlessness data. The data contains gender inequality measures per year, and for convenience we add a new column with the values for the most recent year for which data are available. In this blog, we'll only look at the rank indicators rather than indices and normalized scores. We drop the Subindicator and IndicatorID columns using the *select()* function from the *dplyr* package, as we won't need these further.
+
+```{r}
+library(dplyr)
+gender_index_data["RecentYear"] <- apply(gender_index_data, 1, function(x){as.numeric(x[max(which(!is.na(x)))])})
+gender_index_data <- gender_index_data[gender_index_data$Subindicator.Type == "Rank", ] %>% 
+  select(-Subindicator.Type, -Indicator.Id)
+names(gender_index_data) <- c("ISO3", "Country", "Indicator", as.character(c(2006:2016, 2018)), "RecentYear")
+head(gender_index_data)
+```
+
+Next, we load in our world data with geograpical coordinates directly from package *ggplot2*. These data contain geographical coordinates of all countries worldwide, which we'll later need to plot the worldmaps.
+
+```{r}
+library(ggplot2)
+world_data <- ggplot2::map_data('world')
+world_data <- fortify(world_data)
+head(world_data)
+```
+
+To map our data, we need to merge the childlessness, gender gap index and world map data. As said before, these all have different notations for country names, which is why we'll use the ISO3 codes. However, even between the ISO code data and the other data sets, there is discrepancy in country names. Unfortunately, to solve this, we need to manually change some country names in our data to match those in the ISO code data set. The code for doing so is long and tedious, so I won't show that here, but for your reference you can find it [here](https://www.google.com).
+
+```{r, echo = FALSE}
+old_names <- c("Bolivia (Plurinational State of)", "Cabo Verde", "China, Hong Kong Special Administrative Region",
+               "China, Macao Special Administrative Region", "Congo", "Democratic People's Republic of Korea",
+               "Democratic Republic of the Congo", "Iran (Islamic Republic of)", "Lao People's Democratic Republic",
+               "Micronesia (Federated States of)", "Republic of Korea", "Republic of Moldova", "Saint Vincent and the Grenadines",
+               "State of Palestine", "Syrian Arab Republic", "The former Yugoslav Republic of Macedonia",
+               "United Kingdom of Great Britain and Northern Ireland", "United Republic of Tanzania",
+               "United States Virgin Islands", "Venezuela (Bolivarian Republic of)")
+new_names <- c("Bolivia", "Cape Verde", "Hong Kong, SAR China", "Macao, SAR China", "Congo (Brazzaville)",
+               "Korea (North)", "Congo, (Kinshasa)", "Iran, Islamic Republic of", "Lao PDR", "Micronesia, Federated States of",
+               "Korea (South)", "Moldova", "Saint Vincent and Grenadines", "Palestinian Territory", "Syrian Arab Republic (Syria)",
+               "Macedonia, Republic of", "United Kingdom", "Tanzania, United Republic of", "Virgin Islands, US", "Venezuela (Bolivarian Republic)")
+
+for (i in 1:length(old_names)){
+  childlessness_data$Country[childlessness_data$Country == old_names[i]] <- new_names[i]
+}
+
+old_names <- c("French Southern and Antarctic Lands", "Antigua", "Barbuda", "Saint Barthelemy", "Brunei", "Ivory Coast",
+               "Democratic Republic of the Congo", "Republic of Congo", "Falkland Islands", "Micronesia", "UK", 
+               "Heard Island", "Cocos Islands", "Iran", "Nevis", "Saint Kitts", "South Korea", "Laos", "Saint Martin",
+               "Macedonia", "Pitcairn Islands", "North Korea", "Palestine", "Russia", "South Sandwich Islands",
+               "South Georgia", "Syria", "Trinidad", "Tobago", "Taiwan", "Tanzania", "USA", "Vatican", "Grenadines",
+               "Saint Vincent", "Venezuela", "Vietnam", "Wallis and Fortuna")
+new_names <- c("French Southern Territories", rep("Antigua and Barbuda", 2), "Saint-Barthélemy",
+               "Brunei Darussalam", "Côte d'Ivoire", "Congo, (Kinshasa)", "Congo (Brazzaville)", 
+               "Falkland Islands (Malvinas)", "Micronesia, Federated States of", "United Kingdom",
+               "Heard and Mcdonald Islands", "Cocos (Keeling) Islands", "Iran, Islamic Republic of",
+               rep("Saint Kitts and Nevis", 2), "Korea (South)", "Lao PDR", "Saint-Martin (French part)",
+               "Macedonia, Republic of", "Pitcairn", "Korea (North)", "Palestinian Territory", "Russian Federation",
+               rep("South Georgia and the South Sandwich Islands", 2), 
+               "Syrian Arab Republic (Syria)", rep("Trinidad and Tobago", 2), "Taiwan, Republic of China",
+               "Tanzania, United Republic of", "United States of America", "Holy See (Vatican City State)",
+               rep("Saint Vincent and Grenadines", 2), "Venezuela (Bolivarian Republic)", "Viet Nam", "Wallis and Futuna Islands")
+
+for (i in 1:length(old_names)){
+  world_data$region[world_data$region == old_names[i]] <- new_names[i]
+}
+```
+
+Now the name changes for countries have been made, we can add the ISO3 codes to our childlessness and world map data. The gender gap index data already contain these codes, so there's no need for us to add these there.
+
+```{r}
+childlessness_data['ISO3'] <- iso_codes$ISO3[match(childlessness_data$Country, iso_codes$Country)]
+world_data["ISO3"] <- iso_codes$ISO3[match(world_data$region, iso_codes$Country)]
+```
+
+Next, we melt the childlessness and gender gap index data into long format such that they will have similar shape and column names for merging. The *melt()* function is included in package *reshape2*. The goal here is to create variables that have different unique values for the different data, such that I can show you how to adapt the R Shiny app input to the users' choices. For example, we'll create a *DataType* column that has value *Childlessness* for the rows of the childlessness data and value *Gender Gap Index* for all rows of the gender gap index data. We'll also create a column *Period* that contains earlier, middle and later periods for the childlessness data and different years for the gender gap index data. As such, when the user chooses to explore the childlessness data, the input for the period will only contain the choices relevant to the childlessness data (i.e. earlier, middle and later periods and no years). When the user chooses to explore the gender gap index data, they will only see different years as choices for the input of the period, and not earlier, middle and later periods. The same goes for the *Indicator* column. This may sound slightly vague at this point, but we'll see this in practice later on when building the R Shiny app. 
+
+```{r, warning = FALSE, message = FALSE}
+library(reshape2)
+childlessness_melt <- melt(childlessness_data, id = c("Country", "ISO3", "Period"), 
+                           variable.name = "Indicator", value.name = "Value")
+childlessness_melt$Value <- as.numeric(childlessness_melt$Value)
+gender_index_melt <- melt(gender_index_data, id = c("ISO3", "Country", "Indicator"), 
+                          variable.name = "Period", value.name = "Value")
+```
+After melting the data and ensuring they're in the same format, we merge them together using the *rbind()* function, which we can do here because the data have the same colum names.
+
+```{r, warning = FALSE}
+childlessness_melt["DataType"] <- rep("Childlessness", nrow(childlessness_melt))
+gender_index_melt["DataType"] <- rep("Gender Gap Index", nrow(gender_index_melt))
+df <- rbind(childlessness_melt, gender_index_melt)
+```
+
+## Creating an interactive world map
+
+Next, it's time to define the function that we'll use for building our world maps. The inputs to this function are the merged data frame, the world data containing geographical coordinates, and the data type, period and indicator the user will select in the R Shiny app. We first define our own theme, *my_theme()* for setting the aesthetics of the plot. Next, we select only the data that the user has selected to view, resulting in *plotdf*. We keep only the rows for which the ISO3 code has been specified. For some countries (e.g. Channel Islands in the childlessness data), this was not the case, as these are not contained in the ISO code data. We then add the data the user wants to see to the geographical world data. Finally, we plot the world map. The most important part of this plot is that contained in the *geom_polygon_interactive()* function from the *ggiraph* package. This function draws the world map in white with grey lines, fills it up according to the value of the data selected (either childlessness or gender gap rank) in a red-to-blue color scheme set using the *brewer.pal()* function from the *RColorBrewer* package, and interactively shows at the tooltip the ISO3 code and value when hovering over the plot.
+
+```{r}
+worldMaps <- function(df, world_data, data_type, period, indicator){
+  
+  # Function for setting the aesthetics of the plot
+  my_theme <- function () { 
+    theme_bw() + theme(axis.text = element_text(size = 14),
+                       axis.title = element_text(size = 14),
+                       strip.text = element_text(size = 14),
+                       panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                       panel.background = element_blank(), 
+                       legend.position = "bottom",
+                       panel.border = element_blank(), 
+                       strip.background = element_rect(fill = 'white', colour = 'white'))
+  }
+  
+  # Select only the data that the user has selected to view
+  plotdf <- df[df$Indicator == indicator & df$DataType == data_type & df$Period == period,]
+  plotdf <- plotdf[!is.na(plotdf$ISO3), ]
+  
+  # Add the data the user wants to see to the geographical world data
+  world_data['DataType'] <- rep(data_type, nrow(world_data))
+  world_data['Period'] <- rep(period, nrow(world_data))
+  world_data['Indicator'] <- rep(indicator, nrow(world_data))
+  world_data['Value'] <- plotdf$Value[match(world_data$ISO3, plotdf$ISO3)]
+  
+  # Create caption with the data source to show underneath the map
+  capt <- paste0("Source: ", ifelse(data_type == "Childlessness", "United Nations" , "World Bank"))
+  
+  # Specify the plot for the world map
+  library(RColorBrewer)
+  library(ggiraph)
+  g <- ggplot() + 
+    geom_polygon_interactive(data = world_data, color = 'gray70', size = 0.1,
+                                    aes(x = long, y = lat, fill = Value, group = group, 
+                                        tooltip = sprintf("%s<br/>%s", ISO3, Value))) + 
+    scale_fill_gradientn(colours = brewer.pal(5, "RdBu"), na.value = 'white') + 
+    scale_y_continuous(limits = c(-60, 90), breaks = c()) + 
+    scale_x_continuous(breaks = c()) + 
+    labs(fill = data_type, color = data_type, title = NULL, x = NULL, y = NULL, caption = capt) + 
+    my_theme()
+  
+  return(g)
+}
+```
+
+## Building an R Shiny app
+
+Now we have our data and world mapping function ready and specified, we can start building our R Shiny app. If you're not in any way familiar with R Shiny, I recommend you to have a look at the [Getting Started guide](https://shiny.rstudio.com/tutorial/) first. we can build our app by specifying the UI and server. In the UI, we include a fixed user input selection where the user can choose whether they want to see the childlessness or gender gap index data. We further include dynamic inputs for the period and indicators the user wants to see. As mentioned before, these are dynamic because the choices shown will depend on the selections made by the user on previous inputs. We then use the *ggiraph* package to output our interactive world map. We use the *sidebarLayout* to be able to show the input selections on the left side and the world map on its right side, rather than the two underneath each other. Everything that depends on the inputs by the user needs to be specified in the server function, which is here not only the world map creation but also the second and third input choises, as these depend on the previous inputs made by the user. For example, when we run the app later we'll see that when the user selects the childlessness data for the first input for data type, the third indicator input will only show age groups, and the text above the selector will also show "age group", whereas when the user selects the gender gap index data, the third indicator will show different measures and the text above the selector will show "indicator" rather than "age group".
+
+```{r}
+library(shiny)
+library(ggiraph)
+shinyApp(
+  
+  # Define the UI
+  ui = fluidPage(
+    
+    # App title
+    titlePanel("Childlessness and Gender Gap Index Data"),
+    
+    # Sidebar layout with input and output definitions
+    sidebarLayout(
+      
+      # Sidebar panel for inputs 
+      sidebarPanel(
+        
+        # First input: Type of data
+        selectInput(inputId = "data_type",
+                    label = "Choose the type of data you want to see:",
+                    choices = list("Childlessness" = "Childlessness", "Gender Gap Index" = "Gender Gap Index")),
+        
+        # Second input (choices depend on the choice for the first input)
+        uiOutput("secondSelection"),
+        
+        # Third input (choices depend on the choice for the first and second input)
+        uiOutput("thirdSelection")
+        
+      ),
+      
+      # Main panel for displaying outputs
+      mainPanel(
+        
+        # Hide errors
+        tags$style(type = "text/css",
+                   ".shiny-output-error { visibility: hidden; }",
+                   ".shiny-output-error:before { visibility: hidden; }"),
+        
+        # Output: interactive world map
+        girafeOutput("distPlot")
+        
+      )
+    )
+  ),
+  
+  # Define the server
+  server = function(input, output) {
+    
+    # Create the interactive world map
+    output$distPlot <- renderGirafe({
+      ggiraph(code = print(worldMaps(df, world_data, input$data_type, input$period, input$indicator)))
+    })
+    
+    # Change the choices for the second selection on the basis of the input to the first selection
+    output$secondSelection <- renderUI({
+      choice_second <- as.list(unique(df$Period[which(df$DataType == input$data_type)]))
+      selectInput(inputId = "period", choices = choice_second,
+                  label = "Choose the period for which you want to see the data:")
+    })
+    
+    # Change the choices for the third selection on the basis of the input to the first and second selections
+    output$thirdSelection <- renderUI({
+      lab <- ifelse(input$data_type == "Childlessness", "age group", "indicator")
+      choice_third <- as.list(unique(df$Indicator[df$DataType == input$data_type & df$Period == input$period]))
+      selectInput(inputId = "indicator", choices = choice_third,
+                  label = paste0("Choose the type of ", lab, " you want to explore:"))
+    })
+  },
+   
+  options = list(height = 600)
+  
+)
+```
+
+Finally, we can run our app by either clicking "Run App" in the top of our RStudio IDE, or by running
+```{r, eval = FALSE}
+shinyApp(ui = ui, server = server)
+```
+
+Now try selecting different inputs and see how the input choices change when doing so. Also, don't forget to try hovering over the world map to see different data values for different countries interactively!
