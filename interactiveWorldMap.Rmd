@@ -10,6 +10,15 @@ In this blog, I will show you how to create interactive world maps and how to sh
 
 ```{r setup, warning = FALSE, error = FALSE, message = FALSE, echo = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+if(!require(magrittr)) install.packages("magrittr",repos = "http://cran.us.r-project.org")
+if(!require(rvest)) install.packages("rvest",repos = "http://cran.us.r-project.org")
+if(!require(readxl)) install.packages("readxl",repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr",repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2",repos = "http://cran.us.r-project.org")
+if(!require(reshape2)) install.packages("reshape2",repos = "http://cran.us.r-project.org")
+if(!require(shiny)) install.packages("shiny",repos = "http://cran.us.r-project.org")
+if(!require(ggiraph)) install.packages("ggiraph",repos = "http://cran.us.r-project.org")
+if(!require(RColorBrewer)) install.packages("RColorBrewer",repos = "http://cran.us.r-project.org")
 ```
 
 ## Importing, exploring and cleaning the data
@@ -31,7 +40,7 @@ head(iso_codes)
 ```
 Next, we'll collect our first data set, which is a data set on childlessness provided by the United Nations. We download the file from the link, save it locally and then load it into RStudio using the *read_excel()* function in the *readxl* package.
 
-```{r, results = FALSE, message = FALSE}
+```{r, results = FALSE, warning = FALSE, message = FALSE}
 library(readxl)
 url <- "https://www.un.org/en/development/desa/population/publications/dataset/fertility/wfr2012/Data/Data_Sources/TABLE%20A.8.%20%20Percentage%20of%20childless%20women%20and%20women%20with%20parity%20three%20or%20higher.xlsx"
 destfile <- "dataset_childlessness.xlsx"
@@ -59,7 +68,7 @@ head(gender_index_data)
 ```
 Luckily, these data are better structured than the childlessness data. The data contains gender inequality measures per year, and for convenience we add a new column with the values for the most recent year for which data are available. In this blog, we'll only look at the rank indicators rather than indices and normalized scores. We drop the Subindicator and IndicatorID columns using the *select()* function from the *dplyr* package, as we won't need these further.
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 library(dplyr)
 gender_index_data["RecentYear"] <- apply(gender_index_data, 1, function(x){as.numeric(x[max(which(!is.na(x)))])})
 gender_index_data <- gender_index_data[gender_index_data$Subindicator.Type == "Rank", ] %>% 
@@ -70,7 +79,7 @@ head(gender_index_data)
 
 Next, we load in our world data with geograpical coordinates directly from package *ggplot2*. These data contain geographical coordinates of all countries worldwide, which we'll later need to plot the worldmaps.
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 library(ggplot2)
 world_data <- ggplot2::map_data('world')
 world_data <- fortify(world_data)
@@ -137,7 +146,7 @@ gender_index_melt <- melt(gender_index_data, id = c("ISO3", "Country", "Indicato
 ```
 After melting the data and ensuring they're in the same format, we merge them together using the *rbind()* function, which we can do here because the data have the same colum names.
 
-```{r, warning = FALSE}
+```{r, warning = FALSE, message = FALSE}
 childlessness_melt["DataType"] <- rep("Childlessness", nrow(childlessness_melt))
 gender_index_melt["DataType"] <- rep("Gender Gap Index", nrow(gender_index_melt))
 df <- rbind(childlessness_melt, gender_index_melt)
@@ -147,7 +156,7 @@ df <- rbind(childlessness_melt, gender_index_melt)
 
 Next, it's time to define the function that we'll use for building our world maps. The inputs to this function are the merged data frame, the world data containing geographical coordinates, and the data type, period and indicator the user will select in the R Shiny app. We first define our own theme, *my_theme()* for setting the aesthetics of the plot. Next, we select only the data that the user has selected to view, resulting in *plotdf*. We keep only the rows for which the ISO3 code has been specified. For some countries (e.g. Channel Islands in the childlessness data), this was not the case, as these are not contained in the ISO code data. We then add the data the user wants to see to the geographical world data. Finally, we plot the world map. The most important part of this plot is that contained in the *geom_polygon_interactive()* function from the *ggiraph* package. This function draws the world map in white with grey lines, fills it up according to the value of the data selected (either childlessness or gender gap rank) in a red-to-blue color scheme set using the *brewer.pal()* function from the *RColorBrewer* package, and interactively shows at the tooltip the ISO3 code and value when hovering over the plot.
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 worldMaps <- function(df, world_data, data_type, period, indicator){
   
   # Function for setting the aesthetics of the plot
@@ -197,7 +206,7 @@ worldMaps <- function(df, world_data, data_type, period, indicator){
 
 Now we have our data and world mapping function ready and specified, we can start building our R Shiny app. If you're not in any way familiar with R Shiny, I recommend you to have a look at the [Getting Started guide](https://shiny.rstudio.com/tutorial/) first. we can build our app by specifying the UI and server. In the UI, we include a fixed user input selection where the user can choose whether they want to see the childlessness or gender gap index data. We further include dynamic inputs for the period and indicators the user wants to see. As mentioned before, these are dynamic because the choices shown will depend on the selections made by the user on previous inputs. We then use the *ggiraph* package to output our interactive world map. We use the *sidebarLayout* to be able to show the input selections on the left side and the world map on its right side, rather than the two underneath each other. Everything that depends on the inputs by the user needs to be specified in the server function, which is here not only the world map creation but also the second and third input choises, as these depend on the previous inputs made by the user. For example, when we run the app later we'll see that when the user selects the childlessness data for the first input for data type, the third indicator input will only show age groups, and the text above the selector will also show "age group", whereas when the user selects the gender gap index data, the third indicator will show different measures and the text above the selector will show "indicator" rather than "age group".
 
-```{r}
+```{r, warning = FALSE, message = FALSE}
 library(shiny)
 library(ggiraph)
 shinyApp(
