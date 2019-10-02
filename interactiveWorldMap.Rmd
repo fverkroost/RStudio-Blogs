@@ -14,6 +14,7 @@ if(!require(magrittr)) install.packages("magrittr",repos = "http://cran.us.r-pro
 if(!require(rvest)) install.packages("rvest",repos = "http://cran.us.r-project.org")
 if(!require(readxl)) install.packages("readxl",repos = "http://cran.us.r-project.org")
 if(!require(dplyr)) install.packages("dplyr",repos = "http://cran.us.r-project.org")
+if(!require(maps)) install.packages("maps",repos = "http://cran.us.r-project.org")
 if(!require(ggplot2)) install.packages("ggplot2",repos = "http://cran.us.r-project.org")
 if(!require(reshape2)) install.packages("reshape2",repos = "http://cran.us.r-project.org")
 if(!require(shiny)) install.packages("shiny",repos = "http://cran.us.r-project.org")
