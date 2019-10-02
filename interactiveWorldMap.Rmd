@@ -81,6 +81,7 @@ head(gender_index_data)
 Next, we load in our world data with geograpical coordinates directly from package *ggplot2*. These data contain geographical coordinates of all countries worldwide, which we'll later need to plot the worldmaps.
 
 ```{r, warning = FALSE, message = FALSE}
+library(maps)
 library(ggplot2)
 world_data <- ggplot2::map_data('world')
 world_data <- fortify(world_data)
