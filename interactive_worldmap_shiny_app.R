@@ -1,9 +1,10 @@
 # In this blog, I will show you how to create interactive world maps and how to show these 
 # in the form of an R Shiny app. As the Shiny app cannot be embedded into this blog, I will 
 # direct you to the live app (https://fverkroost.shinyapps.io/interactive_worldmap_app/) and 
-# show you in on my Github () how to embed a Shiny app 
-# in your R Markdown files, which is a really cool and innovative way of preparing interactive 
-# documents. To show you how to adapt the interface of the app to the choices of the users, 
+# show you on my Github how to embed a Shiny app in your R Markdown files, which is a really 
+# cool and innovative way of preparing interactive documents. The link to this is here:
+# (https://github.com/fverkroost/RStudio-Blogs/blob/master/interactive_worldmap_shiny_embedded.Rmd)
+# To show you how to adapt the interface of the app to the choices of the users, 
 # we'll make use of two data sources such that the user can choose what data they want to 
 # explore and that the app adapts the possible input choices to the users' previous choices. 
 # The data sources here are about childlessness and gender inequality, which is the focus of 
@@ -319,10 +320,10 @@ server = function(input, output) {
 # Finally, we can run our app by either clicking "Run App" in the top of our RStudio IDE, or by running
 shinyApp(ui = ui, server = server)
 
-# You can check out the live app here (https://fverkroost.shinyapps.io/interactive_worldmap_app/). In this 
-# () post on my Github, you can also see how to embed 
-# a Shiny app in your R Markdown files, which is a really cool and innovative way of preparing interactive 
-# documents. Finally, the source code used to build the live app can also be found on my Github here ().
+# You can check out the live app here (https://fverkroost.shinyapps.io/interactive_worldmap_app/). In this
+# post (https://github.com/fverkroost/RStudio-Blogs/blob/master/interactive_worldmap_shiny_embedded.Rmd)
+# on my Github, you can also see how to embed a Shiny app in your R Markdown files, which is a really cool 
+# and innovative way of preparing interactive documents. 
 
 # Now try selecting different inputs and see how the input choices change when doing so. Also, don't 
 # forget to try hovering over the world map to see different data values for different countries interactively!
