@@ -1,6 +1,6 @@
 ---
 title: "Building interactive world maps in R Shiny"
-author: "Florianne Verkroost"
+author: "Florianne Verkroost ([LinkedIn](https://www.linkedin.com/in/florianneverkroost/), [Github](https://github.com/fverkroost))"
 date: "8/23/2019"
 output: html_document
 runtime: shiny
