@@ -181,7 +181,7 @@ print("Model with three layers and five epochs -- Test loss:", test_loss * 100)
 print("Model with three layers and five epochs -- Test accuracy:", test_acc * 100)
 ```
 
-We can see that the neural network with one hidden layer already performs relatively well compared to the tree-based methods we've seen before, with a test set accuracy of `python test_acc` percent. To see whether a deep neural network performs better at predicting clothing categories, we build a neural network with three hidden layers in a similar way as before.
+We can see that the neural network with one hidden layer already performs relatively well, with a test set accuracy of `python test_acc` percent. To see whether a deep neural network performs better at predicting clothing categories, we build a neural network with three hidden layers in a similar way as before.
 
 ```{python, message = FALSE, warning = FALSE, results = 'hide'}
 # Develop a model with five layers (input layer, five hidden layers and output layer)
