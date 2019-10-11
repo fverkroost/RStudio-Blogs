@@ -107,21 +107,6 @@ train.data <- cbind(train.labels, train.images)
 test.data <- cbind(test.labels, test.images)
 ```
 
-Finally, we prepare a balanced subsample of 1000 images (100 per clothing category) of the training data for later on. We use the pipeline (`%>%`) in package `magrittr` together with functions from package `dplyr` to manipulate the data. As some of the models take quite long, we fit them on a subsample of the training data due to time constraints. Fitting the models on the full training dataset is preferable though.
-
-```{r, message = FALSE, warning = FALSE, results = 'hide'}
-library(magrittr)
-library(dplyr)
-```
-```{r}
-train.data.subsample <- train.data %>% 
-  group_by(label) %>% 
-  sample_n(size = 100) %>% 
-  ungroup()
-train.images.subsample <- train.data.subsample %>% select(-one_of("label"))
-train.labels.subsample <- train.data.subsample %>% select(one_of("label"))
-```
-
 ## Neural Network
 
 Now, let's continue by building a simple neural network model to predict our clothing categories. Neural networks are artificial computing systems that were built with human neural networks in mind. Neural networks contain nodes, which transmit signals amongst one another. Usually the input at each node is a number, which is transformed according to a non-linear function of the input and weights, the latter being the parameters that are tuned while training the model. Sets of neurons are collected in different layers; neural networks are reffered to as 'deep' when they contain at least two hidden layers. 
