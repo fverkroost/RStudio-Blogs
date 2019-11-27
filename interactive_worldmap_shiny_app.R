@@ -176,6 +176,8 @@ gender_index_melt <- melt(gender_index_data, id = c("ISO3", "Country", "Indicato
 childlessness_melt["DataType"] <- rep("Childlessness", nrow(childlessness_melt))
 gender_index_melt["DataType"] <- rep("Gender Gap Index", nrow(gender_index_melt))
 df <- rbind(childlessness_melt, gender_index_melt)
+df[] <- lapply(df, as.character)
+df$Value <- as.numeric(df$Value)
 
 # Next, it's time to define the function that we'll use for building our world maps. The inputs to this 
 # function are the merged data frame, the world data containing geographical coordinates, and the data type, 
