@@ -152,6 +152,8 @@ After melting the data and ensuring they're in the same format, we merge them to
 childlessness_melt["DataType"] <- rep("Childlessness", nrow(childlessness_melt))
 gender_index_melt["DataType"] <- rep("Gender Gap Index", nrow(gender_index_melt))
 df <- rbind(childlessness_melt, gender_index_melt)
+df[] <- lapply(df, as.character)
+df$Value <- as.numeric(df$Value)
 ```
 
 ## Creating an interactive world map
