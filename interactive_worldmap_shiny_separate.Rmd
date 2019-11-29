@@ -165,9 +165,9 @@ worldMaps <- function(df, world_data, data_type, period, indicator){
   
   # Function for setting the aesthetics of the plot
   my_theme <- function () { 
-    theme_bw() + theme(axis.text = element_text(size = 14),
-                       axis.title = element_text(size = 14),
-                       strip.text = element_text(size = 14),
+    theme_bw() + theme(axis.title = element_blank(),
+                       axis.text = element_blank(),
+                       axis.ticks = element_blank(),
                        panel.grid.major = element_blank(), 
                        panel.grid.minor = element_blank(),
                        panel.background = element_blank(), 
@@ -193,12 +193,10 @@ worldMaps <- function(df, world_data, data_type, period, indicator){
   library(RColorBrewer)
   library(ggiraph)
   g <- ggplot() + 
-    geom_polygon_interactive(data = world_data, color = 'gray70', size = 0.1,
+    geom_polygon_interactive(data = subset(world_data, lat >= -60 & lat <= 90), color = 'gray70', size = 0.1,
                                     aes(x = long, y = lat, fill = Value, group = group, 
                                         tooltip = sprintf("%s<br/>%s", ISO3, Value))) + 
     scale_fill_gradientn(colours = brewer.pal(5, "RdBu"), na.value = 'white') + 
-    scale_y_continuous(limits = c(-60, 90), breaks = c()) + 
-    scale_x_continuous(breaks = c()) + 
     labs(fill = data_type, color = data_type, title = NULL, x = NULL, y = NULL, caption = capt) + 
     my_theme()
   
