@@ -1,0 +1,173 @@
+---
+title: "A comparison of methods for predicting clothing classes using the Fashion MNIST dataset in RStudio and Python (Part 2)"
+author: "Florianne Verkroost"
+date: "19/02/2020"
+output:
+  html_document:
+    mathjax: default
+---
+
+In this series of blog posts, I will compare different machine and deep learning methods to predict clothing categories from images using the Fashion MNIST data by Zalando. In [the first blog post of this series](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-1/), we explored and prepared the data for analysis and learned how to predict the clothing categories of the Fashion MNIST data using my go-to model: an artificial neural network in Python. In this second blog post, I will perform dimension reduction on the data in order to speed up some of the machine learning models we will run in the next posts (including tree-based methods and support vector machines), and examine whether these models in conjunction with reduced data can achieve similar performance (88.8% accuracy on the test data) as the neural networks from the [the first blog post of this series](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-1/). The R code for this post can be found on my [Github](https://github.com/fverkroost/RStudio-Blogs/blob/master/machine_learning_fashion_mnist_post234.R).
+
+```{r setup, message = FALSE, warning = FALSE, results = 'hide', echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Preparation
+
+In the [first blog post of this series](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-1/), I already showed you how to load the data, plot some of the images in the data and prepare them for further analysis. Therefore, I won't do that here again in detail, but please read the post for a more extensive explanation of what the data look like. The `keras` package contains the Fashion MNIST data, so we can easily import the data into RStudio from this package directly after installing it from Github and loading it. 
+
+```{r, message = FALSE, warning = FALSE, results = 'hide'}
+library(devtools)
+devtools::install_github("rstudio/keras")
+library(keras)        
+install_keras()  
+fashion_mnist = keras::dataset_fashion_mnist()
+```
+
+We obtain separate data sets for the training and test images as well as the training and test labels.
+
+```{r, message = FALSE, warning = FALSE, results = 'hide'}
+library(magrittr)
+c(train.images, train.labels) %<-% fashion_mnist$train
+c(test.images, test.labels) %<-% fashion_mnist$test
+```
+
+Next, we normalize the image data by dividing the pixel values by the maximum value of 255.
+
+```{r, message = FALSE, warning = FALSE, results = 'hide'}
+train.images = data.frame(t(apply(train.images, 1, c))) / max(fashion_mnist$train$x)
+test.images = data.frame(t(apply(test.images, 1, c))) / max(fashion_mnist$train$x)
+```
+
+We then combine the training images `train.images` and labels `train.labels` and test images `test.images` and labels `test.labels` in separate data sets, `train.data` and `test.data`, respectively. 
+
+```{r, message = FALSE, warning = FALSE, results = 'hide'}
+pixs = ncol(fashion_mnist$train$x)
+names(train.images) = names(test.images) = paste0('pixel', 1:(pixs^2))
+train.labels = data.frame(label = factor(train.labels))
+test.labels = data.frame(label = factor(test.labels))
+train.data = cbind(train.labels, train.images)
+test.data = cbind(test.labels, test.images)
+```
+
+As `train.labels` and `test.labels` contain integer values for the clothing category (i.e. 0, 1, 2, etc.), we also create objects `train.classes` and `test.classes` that contain factor labels (i.e. Top, Trouser, Pullover etc.) for the clothing categories.
+
+```{r, message = FALSE, warning = FALSE, results = 'hide'}
+cloth_cats = c('Top', 'Trouser', 'Pullover', 'Dress', 'Coat',  
+                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Boot')
+train.classes = factor(cloth_cats[as.numeric(as.character(train.labels$label)) + 1])
+test.classes = factor(cloth_cats[as.numeric(as.character(test.labels$label)) + 1])
+```
+
+# Principal Components Analysis
+
+Our training and test image data sets currently contain 784 pixels and thus variables. We may expect a large share of these pixels, especially those towards the boundaries of the images, to have relatively small variance, because most of the fashion items are centered in the images. In other words, there may be quite some redundant pixels in our data set. To check whether this is the case, let's plot the average pixel value on a 28 by 28 grid. We first obtain the average pixel values and store these in `train.images.ave`, after which we plot these values on the grid. We also define a custom plotting theme, `my_theme`, to make sure all our figures have the same custom-defined aesthetics. Note that in the plot created, a higher cell (pixel) value means that the average value of that pixel is higher, and thus that the pixel is darker on average (as a pixel value of 0 refers to white and a pixel value of 255 refers to black).
+
+```{r, message = FALSE, warning = FALSE}
+train.images.ave = data.frame(pixel = apply(train.images, 2, mean), 
+                               x = rep(1:pixs, each = pixs), 
+                               y = rep(1:pixs, pixs))
+library(ggplot2)
+my_theme = function () { 
+  theme_bw() + 
+    theme(axis.text = element_text(size = 14),
+          axis.title = element_text(size = 14),
+          strip.text = element_text(size = 14),
+          panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(), 
+          legend.position = "bottom",
+          strip.background = element_rect(fill = 'white', colour = 'white'))
+}
+ggplot() +
+  geom_raster(data = train.images.ave, aes(x = x, y = y, fill = pixel)) +
+  my_theme() +
+  labs(x = NULL, y = NULL, fill = "Average scaled pixel value") +
+  ggtitle('Average image in Fashion MNIST training data')
+```
+
+As we can see from the plot, there are quite some pixels with a low average value, meaning that they are white in most of the images in our training data. These pixels are mostly redundant, while they do contribute to computational costs and sparsity. Therefore, we might be better off reducing the dimensionality in our data to reduce redundancy, overfitting and computational cost. One method to do so is principal components analysis (PCA), which I will demonstrate today. Essentially, PCA statistically reduces the dimensions of a set of correlated variables by transforming them into a smaller number of linearly uncorrelated variables (principal components) that are linear combinations of the original variables. The first principal component explains the largest part of the variance, followed by the second principal component andsoforth. For a more extensive explanation of PCA, I refer you to James et al. (2013). Let's first have a look at how many variables can explain which part of the variance in our data. We compute the 784 by 784 covariance matrix of our training images using the `cov()` function, after which we execute PCA on the covariance matrix using the `prcomp()` function in the `stats` library. Looking at the results, we observe that 50 principal components in our data explain 99.902% of the variance in the data. This can be nicely shown in a plot of the cumulative proportion of variance against component indices. Note that the component indices here are sorted by their ability to explain the variance in our data, and not based on their pixel position in the 28 by 28 image.
+
+```{r, message = FALSE, warning = FALSE}
+library(stats)
+cov.train = cov(train.images)                      
+pca.train = prcomp(cov.train)                  
+
+plotdf = data.frame(index = 1:(pixs^2), 
+                    cumvar = summary(pca.train)$importance["Cumulative Proportion", ])
+t(head(plotdf, 50)) 
+
+ggplot() + 
+  geom_point(data = plotdf, aes(x = index, y = cumvar), color = "red") +
+  labs(x = "Index of primary component", y = "Cumulative proportion of variance") +
+  my_theme() +
+  theme(strip.background = element_rect(fill = 'white', colour = 'black'))
+```
+
+We observed that 99.5% of the variance is explained by only 17 principal components. As 99.5% is already a large share of the variance, and we want to reduce the number of pixels (variables) by as many as we can to reduce computation time for the models coming up, we choose to select the 17 components explaining 99.5% of the variance. Although this is unlikely to influence our results hugely, if you have more time, I'd suggest you select the 50 components explaining 99.9% of the data, or execute the analyses on the full data set. We also save the relevant part of the rotation matrix created by the `prcomp()` function and stored in `pca.train`, such that its dimensions become 784 by 17, and then we multiply our training and test image data by this rotation matrix called `pca.rot`. We then combine the transformed image data (`train.images.pca` and `test.images.pca`) with the integer labels for the clothing categories in `train.data.pca` and `test.data.pca`. We will use these reduced data in our further analyses to decrease computational time.
+
+```{r, message = FALSE, warning = FALSE}
+pca.dims = which(plotdf$cumvar >= .995)[1]
+pca.rot = pca.train$rotation[, 1:pca.dims]  
+
+train.images.pca = data.frame(as.matrix(train.images) %*% pca.rot)
+test.images.pca  = data.frame(as.matrix(test.images) %*% pca.rot)
+
+train.data.pca = cbind(train.images.pca, label = factor(train.data$label))
+test.data.pca = cbind(test.images.pca, label = factor(test.data$label))
+```
+
+# Model Performance
+
+To easily compare the models we estimate in this blog post, let's write a simple function `model_performance()` that is able to output some performance metrics for each type of model we will estimate (random forest, gradient-boosted trees, support vector machines). The function essentially predicts the estimated model on both the training data and test data, resulting in `pred_train` respectively `pred_test`, and then computes the accuracy, precision, recall and F1 measures for both the training and test set predictions. Have a look at [this blog post](https://towardsdatascience.com/whats-the-deal-with-accuracy-precision-recall-and-f1-f5d8b4db1021) if you are unsure what these performance metrics entail. Depending on the type of model, sometimes inputs `testX` and `testY` require the categorical classes (e.g. top, trouser, pullover etcetera) as in `train.classes` and `test.classes`, whereas other models estimate like the random forests estimate the integer classes (e.g. 0, 1, 2 etcetera) and thus require classes as in `train.data$label` and `test.data$label`. Note that for the models implemented with the `caret` package, we need to use the out-of-bag predictions contained in the model objects (`fit$pred`) rather than the manually computed in-sample (non-out-of-bag) predictions for the training data. As `fit$pred` contains the predictions for all tuning parameter values specified by the user while we only need those predictions belonging to the optimal tuning parameter values, we subset `fit$pred` to only contain those predictions and observations in indices `rows`. Note that we convert `fit$pred` to a `data.table` object to find these indices as computations on `data.table` objects are much faster for large data frames as in our case (e.g. `xgb_tune$pred` has over 29 million rows as we will see later on).
+
+```{r}
+model_performance = function(fit, trainX, testX, trainY, testY, model_name){
+  
+  # Predictions on train and test data for models estimated with caret
+  if (any(class(fit) == "train")){
+    
+    library(data.table)
+    pred_dt = as.data.table(fit$pred[, names(fit$bestTune)]) 
+    names(pred_dt) = names(fit$bestTune)
+    index_list = lapply(1:ncol(fit$bestTune), function(x, DT, tune_opt){
+      return(which(DT[, Reduce(`&`, lapply(.SD, `==`, tune_opt[, x])), .SDcols = names(tune_opt)[x]]))
+    }, pred_dt, fit$bestTune)
+    rows = Reduce(intersect, index_list)
+    pred_train = fit$pred$pred[rows]
+    pred_test = predict(fit, newdata = testX)
+    trainY = fit$pred$obs[rows]
+    
+  } else {
+    
+    print(paste0("Error: Function evaluation unknown for object of type ", class(fit)))
+    break
+    
+  }
+  
+  # Performance metrics on train and test data
+  library(MLmetrics)
+  df = data.frame(accuracy_train = Accuracy(trainY, pred_train),
+                  precision_train = Precision(trainY, pred_train),
+                  recall_train = Recall(trainY, pred_train),
+                  F1_train = F1_Score(trainY, pred_train), 
+                  accuracy_test = Accuracy(testY, pred_test),
+                  precision_test = Precision(testY, pred_test),
+                  recall_test = Recall(testY, pred_test),
+                  F1_test = F1_Score(testY, pred_test),
+                  model = model_name)
+  
+  print(df)
+  
+  return(df)
+}
+```
+
+# References 
+
+James, G., Witten, D., Hastie, T., & Tibshirani, R. (2013). An introduction to statistical learning (Vol. 112, p. 18). New York: Springer.
+
+# Next up in this series...
+
+In the next blog post of this series, we will use the PCA reduced data and `model_performance` function to estimate and assess tree-based methods, including random forests and gradient-boosted trees. Curious to see how these models perform on the reduced data? Let's have a look!

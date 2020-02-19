@@ -1,0 +1,308 @@
+---
+title: "A comparison of methods for predicting clothing classes using the Fashion MNIST dataset in RStudio and Python (Part 3)"
+author: "Florianne Verkroost"
+date: "19/02/2020"
+output:
+  html_document:
+    mathjax: default
+---
+
+In this series of blog posts, I will compare different machine and deep learning methods to predict clothing categories from images using the Fashion MNIST data by Zalando. In [the first blog post of this series](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-1/), we explored and prepared the data for analysis and learned how to predict the clothing categories of the Fashion MNIST data using my go-to model: an artificial neural network in Python. In [the second blog post](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-2/), we used principal components analysis to reduce the data dimensionality and wrote a function to assess the performance of the models we will estimate in this post, namely tree-based methods (random forests and boosting). The R code for this post can be found on my [Github](https://github.com/fverkroost/RStudio-Blogs/blob/master/machine_learning_fashion_mnist_post234.R). Note that the data used in this post is based on the data preparation and principal components analysis from [the second blog post of this series](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-2/).
+
+```{r setup, message = FALSE, warning = FALSE, results = 'hide', echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE, results = 'hide', echo = FALSE}
+library(devtools)
+devtools::install_github("rstudio/keras")
+library(keras)        
+install_keras()  
+fashion_mnist = keras::dataset_fashion_mnist()
+library(magrittr)
+c(train.images, train.labels) %<-% fashion_mnist$train
+c(test.images, test.labels) %<-% fashion_mnist$test
+train.images = data.frame(t(apply(train.images, 1, c))) / max(fashion_mnist$train$x)
+test.images = data.frame(t(apply(test.images, 1, c))) / max(fashion_mnist$train$x)
+pixs = ncol(fashion_mnist$train$x)
+names(train.images) = names(test.images) = paste0('pixel', 1:(pixs^2))
+train.labels = data.frame(label = factor(train.labels))
+test.labels = data.frame(label = factor(test.labels))
+train.data = cbind(train.labels, train.images)
+test.data = cbind(test.labels, test.images)
+cloth_cats = c('Top', 'Trouser', 'Pullover', 'Dress', 'Coat',  
+                'Sandal', 'Shirt', 'Sneaker', 'Bag', 'Boot')
+train.classes = factor(cloth_cats[as.numeric(as.character(train.labels$label)) + 1])
+test.classes = factor(cloth_cats[as.numeric(as.character(test.labels$label)) + 1])
+```
+
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+library(stats)
+cov.train = cov(train.images)                      
+pca.train = prcomp(cov.train)
+plotdf = data.frame(index = 1:(pixs^2), 
+                    cumvar = summary(pca.train)$importance["Cumulative Proportion", ])
+pca.dims = which(plotdf$cumvar >= .995)[1]
+pca.rot = pca.train$rotation[, 1:pca.dims]  
+train.images.pca = data.frame(as.matrix(train.images) %*% pca.rot)
+test.images.pca  = data.frame(as.matrix(test.images) %*% pca.rot)
+train.data.pca = cbind(train.images.pca, label = factor(train.data$label))
+test.data.pca = cbind(test.images.pca, label = factor(test.data$label))
+```
+
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+model_performance = function(fit, trainX, testX, trainY, testY, model_name){
+  
+  # Predictions on train and test data for different types of models
+  if (any(class(fit) == "rpart")){
+    
+    library(rpart)
+    pred_train = predict(fit, newdata = trainX, type = "class")
+    pred_test = predict(fit, newdata = testX, type = "class")
+    
+  } else if (any(class(fit) == "train")){
+    
+    library(data.table)
+    pred_dt = as.data.table(fit$pred[, names(fit$bestTune)]) 
+    names(pred_dt) = names(fit$bestTune)
+    index_list = lapply(1:ncol(fit$bestTune), function(x, DT, tune_opt){
+      return(which(DT[, Reduce(`&`, lapply(.SD, `==`, tune_opt[, x])), .SDcols = names(tune_opt)[x]]))
+    }, pred_dt, fit$bestTune)
+    rows = Reduce(intersect, index_list)
+    pred_train = fit$pred$pred[rows]
+    pred_test = predict(fit, newdata = testX)
+    trainY = fit$pred$obs[rows]
+    
+  } else {
+    
+    print(paste0("Error: Function evaluation unknown for object of type ", class(fit)))
+    break
+    
+  }
+  
+  # Performance metrics on train and test data
+  library(MLmetrics)
+  df = data.frame(accuracy_train = Accuracy(trainY, pred_train),
+                  precision_train = Precision(trainY, pred_train),
+                  recall_train = Recall(trainY, pred_train),
+                  F1_train = F1_Score(trainY, pred_train), 
+                  accuracy_test = Accuracy(testY, pred_test),
+                  precision_test = Precision(testY, pred_test),
+                  recall_test = Recall(testY, pred_test),
+                  F1_test = F1_Score(testY, pred_test),
+                  model = model_name)
+  
+  print(df)
+  
+  return(df)
+}
+```
+
+# Tree-Based Methods
+
+In this first sub-section, we will compare different tree-based methods: random forests and gradient-boosted trees. Tree-based methods stratify or segment the predictor space into a number of simple regions using a set of decision rules that can be summarized in a decision tree. The focus here will be on classification trees, as the Fashion MNIST outcome variable is categorical and has 10 classes. Unfortunately, single trees have a relatively low level of predictive accuracy compared to other classification approaches, such as logistic regression or discriminant analysis. Therefore, I will not show you how to fit a single tree in this blog post, but you can find the code for this (as well as tree pruning) on my [Github](https://github.com/fverkroost/RStudio-Blogs/blob/master/machine_learning_fashion_mnist_post234.R) To improve prediction accuracy, ensemble methods aggregate many single decision trees and thereby provide a good way to achieve prediction accuracy while decreasing variance. Here, I decided to show random forests and gradient-boosted trees as ensemble methods because the former are easier to implement as they are more robust to over-fitting and require less tuning, while the latter generally outperform other tree-based methods in terms of prediction accuracy. The models are estimated in supervised mode here as labeled data is available and the goal is to predict classes. For a more formal explanation of the tree-based methods used in this blog post, I refer you to James et al. (2013).
+
+
+## Random Forest
+
+Single unpruned and pruned classification trees often do not perform very well (64% accuracy on the test set as shown on my [Github](https://github.com/fverkroost/RStudio-Blogs/blob/master/machine_learning_fashion_mnist_post234.R)). Random forests use bootstrap aggregating to reduce the variance of the outcomes. First, bootstrapping (sampling with replacement) is used to create $B$ training sets from the population with the same size as the original training set. Second, a separate tree for each of these training sets is built. Trees are grown using recursive binary splitting on the training data until a node reaches some minimum number of observations. Hereby, the tree should go from impure (equal mixing of classes) to pure (each leaf corresponds to one class exactly). The splits are determined such that they decrease variance, error and impurity. Random forests decorrelate the trees by considering only $m$ of all $p$ predictors as split candidates, whereby often $m = \sqrt{p}$. Classification trees predict that each observation belongs to the most commonly occurring class (i.e. majority vote) of training observations in the region to which it belongs. The classification error rate is the fraction of the number of misclassified observations and the total number of classified observations. The Gini index and cross-entropy measures determine the level of impurity in order to determine the best split at each node. Third, the average of the classification prediction results of all $B$ trees is computed from the majority vote, i.e. the prediction that occurs most often among the $B$ predictions. The accuracy is computed as the out-of-bag (OOB) error and/or the test set error. As each bootstrap samples from the training set with replacement, about $\frac{2}{3}$ of the observations are not sampled and some are sampled multiple times. In the case of $B$ trees in the forest, each observation is left out of approximately $\frac{B}{3}$ trees. The non-sampled observations are used as test set and the $\frac{B}{3}$ trees are used for out-of-sample predictions. In random forests, pruning is not needed as potential over-fitting is (partially) mitigated by the usage of bootstrapped samples and multiple decorrelated random trees. 
+
+We start by tuning the number of variables that are randomly sampled as candidates at each split (`mtry`), for which we make use of the `caret` framework. The advantage of the `caret` framework is that we can easily train and evaluate a large number (238 at the time of writing) of different types of models using cross-validation with similar lines of code and structures. For our random forests, we have the `repeatedcv` method perform five-fold cross-validation with five repetitions. For now, we build a random forest containing 200 trees because previous analyses with these data showed that the error does not decrease substantially when the number of trees is larger than 200, while a larger number of trees does require more computational power. We will see later on that 200 trees is indeed sufficient for this analysis. We let the algorithm determine what the best model is based on the accuracy metric, and we ask the algorithm to run the model for `pca.dims` (=17) different values of `mtry`. We first specify the controls in `rf_rand_control`: we perform 5-fold cross-validation with 5 repeats (`method = "cv"`, `number = 5` and `repeats = 5`), allow parallel computation (`allowParallel = TRUE`) and save the predicted values (`savePredictions = TRUE`).
+
+```{r, message = FALSE, error = FALSE, warning = FALSE, eval = FALSE}
+library(caret)
+rf_rand_control = trainControl(method = "repeatedcv", 
+                             search = "random", 
+                             number = 5, 
+                             repeats = 5, 
+                             allowParallel = TRUE, 
+                             savePredictions = TRUE)
+set.seed(1234)
+rf_rand = train(x = train.images.pca, 
+                 y = train.data.pca$label,
+                 method = "rf", 
+                 ntree = 200,
+                 metric = "Accuracy", 
+                 trControl = rf_rand_control, 
+                 tuneLength = pca.dims) 
+```
+
+```{r, message = FALSE, error = FALSE, warning = FALSE, eval = FALSE}
+print(rf_rand)
+```
+
+![](screen_shots_fashion_mnist/rf_rand_print.png)
+
+```{r, eval = FALSE}
+mp.rf.rand = model_performance(rf_rand, train.images.pca, test.images.pca, 
+                               train.data.pca$label, test.data.pca$label, "random_forest_random")
+```
+
+![](screen_shots_fashion_mnist/rf_rand_mp.png)
+
+We can also use the `caret` framework to perform a grid search with pre-specified values for `mtry` rather than a random search as above.
+
+```{r, message = FALSE, error = FALSE, warning = FALSE, eval = FALSE}
+rf_grid_control = trainControl(method = "repeatedcv", 
+                             search = "grid", 
+                             number = 5, 
+                             repeats = 5, 
+                             allowParallel = TRUE, 
+                             savePredictions = TRUE)
+set.seed(1234)
+rf_grid = train(x = train.images.pca, 
+                 y = train.data.pca$label,
+                 method = "rf", 
+                 ntree = 200,
+                 metric = "Accuracy", 
+                 trControl = rf_grid_control,
+                 tuneGrid = expand.grid(.mtry = c(1:pca.dims)))
+```
+
+
+```{r, message = FALSE, error = FALSE, warning = FALSE, eval = FALSE}
+plot(rf_grid)
+```
+
+![](screen_shots_fashion_mnist/rf_grid_plot.png)
+
+```{r, eval = FALSE}
+mp.rf.grid = model_performance(rf_grid, train.images.pca, test.images.pca, 
+                               train.data.pca$label, test.data.pca$label, "random_forest_grid")
+```
+
+![](screen_shots_fashion_mnist/rf_grid_mp.png)
+
+As shown by the results, the random search selects `mtry=4` as the optimal parameter, resulting in 85% training and test set accuracies. The grid search selects `mtry=5` and achieves similar accuracies for both values of 4 and 5 for `mtry`. We can see from the results that according to `rf_rand`, `mtry` values of 4 and 5 lead to very similar results, which also goes for `mtry` values of 5 and 6 for `rf_grid`. Although the results of `rf_rand` and `rf_grid` are very similar, we choose the best model on the basis of accuracy and save this in `rf_best`. For this model, we'll look at the relationship between the error and random forest size as well as the receiver operating characteristic (ROC) curves for every class. Let's start by subtracting the best performing model from `rf_rand` and `rf_grid`.
+
+```{r, eval = FALSE}
+rf_models = list(rf_rand$finalModel, rf_grid$finalModel)
+rf_accs = unlist(lapply(rf_models, function(x){ sum(diag(x$confusion)) / sum(x$confusion) }))
+rf_best = rf_models[[which.max(rf_accs)]]
+```
+
+Next, we plot the relationship between the size of the random forest and the error using the `plot()` function from the `randomForest` package.
+```{r, eval = FALSE}
+library(randomForest)
+plot(rf_best, main = "Relation between error and random forest size")
+```
+
+![](screen_shots_fashion_mnist/rf_error_trees.png)
+
+We observe from this plot that the error does not decrease anymore for any of the classes after about 100 trees, and so we can conclude that our forest size of 200 is sufficient. We can also use the `varImpPlot()` function from the `randomForest` package to plot the importance for each variable. I will not show that here because it's not as meaningful given that our variables are principal components of the actual pixels, but it's good to keep in mind when extending these analyses to other data. Finally, we plot the ROC curves for every class. The area underneath this curve is the proportion of correct classifications for that particular class, so the further the curve is "drawn" towards the top left from the 45 degrees line, the better the classification for that class. On the x-axis of an ROC plot, we usually have the false positive rate (false positive / (true negative + false positive)) and on the y-axis the true positive rate (true positive / (true positive + false negative)). Essentially, the ROC plot helps us to compare the performance of our model with respect to predicting different classes. We first need to obtain the data for the ROC curve for every class (or clothing category) in our data, which we all bind together by rows, including a label for the classes.
+
+```{r, message = FALSE, error = FALSE, warning = FALSE, eval = FALSE}
+library(ROCR)
+library(plyr)
+pred_roc = predict(rf_best, test.images.pca, type = "prob")
+classes = unique(test.data.pca$label)
+classes = classes[order(classes)]
+plot_list = list()
+for (i in 1:length(classes)) { 
+  actual = ifelse(test.data.pca$label == classes[i], 1, 0)
+  pred = prediction(pred_roc[, i], actual)
+  perf = performance(pred, "tpr", "fpr")
+  plot_list[[i]] = data.frame(matrix(NA, nrow = length(perf@x.values[[1]]), ncol = 2))
+  plot_list[[i]]['x'] = perf@x.values[[1]]
+  plot_list[[i]]['y'] = perf@y.values[[1]]
+}
+plotdf = rbind.fill(plot_list)
+plotdf["Class"] = rep(cloth_cats, unlist(lapply(plot_list, nrow)))
+```
+
+Next, we plot the ROC curves for every class. Note that we use the custom plotting theme `my_theme()` as defined in the [the second blog post of this series](https://rviews.rstudio.com/2019/11/11/a-comparison-of-methods-for-predicting-clothing-classes-using-the-fashion-mnist-dataset-in-rstudio-and-python-part-2/).
+```{r, eval = FALSE}
+ggplot() +
+  geom_line(data = plotdf, aes(x = x, y = y, color = Class)) + 
+  labs(x = "False positive rate", y = "True negative rate", color = "Class") +
+  ggtitle("ROC curve per class") + 
+  theme(legend.position = c(0.85, 0.35)) +
+  coord_fixed() + 
+  my_theme()
+```
+
+![](screen_shots_fashion_mnist/rf_roc.png)
+
+We observe from the ROC curves that shirts and pullovers are most often misclassified (as we saw before from the confusion matrix), whereas trousers, bags, boots and sneakers are most often correctly classified. This also corresponds to what we also observed from the plotted confusion matrix earlier. A possible explanation for this could be that shirts and pullovers can be very similar in shape to other categories, such as tops, coats and dresses; whereas bags, trousers, boots and sneakers are more dissimilar to other categories in the data.
+
+## Gradient-Boosted Trees
+
+While in random forests each tree is fully grown and trained independently with a random sample of data, in boosting every newly built tree incorporates the error from the previously built tree. That is, the trees are grown sequentially on an adapted version of the initial data, which does not require bootstrap sampling. Because of this, boosted trees are usually smaller and more shallow than the trees in random forests, improving the tree where it does not work well enough yet. Boosting is often said to outperform random forests, which is mainly because the approach learns slowly. This can be even further controlled by one of its parameters (i.e. shrinkage), which we'll tune later. 
+
+In boosting, it's important to tune the parameters well and play around with different values of the parameters, which can easily be done using the `caret` framework. These parameters include the learning rate (`eta`), the minimal required loss reduction to further partition on a leaf node of the tree (`gamma`), the maximal depth of a tree (`max_depth`), the number of trees in the forest (`nrounds`), the minimum number of observsations in the trees' nodes (`min_child_weight`), the fraction of the training set observations randomly selected to grow trees (`subsample`) and the proportion of independent variables to use for each tree (`colsample_bytree`). An overview of all parameters can be found [here](https://xgboost.readthedocs.io/en/latest/parameter.html#parameters-for-tree-booster). Again, we use the `caret` framework to tune our boosting model. 
+
+```{r, eval = FALSE}
+xgb_control = trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  allowParallel = TRUE,
+  savePredictions = TRUE
+)
+```
+
+Next, we define the possible combinations of the tuning parameters in the form of a grid, named `xgb_grid`.
+```{r, eval = FALSE}
+xgb_grid = expand.grid(
+  nrounds = c(50, 100), 
+  max_depth = seq(5, 15, 5),
+  eta = c(0.002, 0.02, 0.2),
+  gamma = c(0.1, 0.5, 1.0), 
+  colsample_bytree = 1, 
+  min_child_weight = c(1, 2, 3),
+  subsample = c(0.5, 0.75, 1)
+)
+```
+
+We set the seed and then train the model onto the transformed principal components of the training data using `xgb_control` and `xgb_grid` as specified earlier. Note that because of the relatively large number of tuning parameters, and thus the larger number of possible combinations of these parameters (`nrow(xgb_grid) = 486`), this may take quite a long time to run.
+```{r, eval = FALSE}
+set.seed(1234)
+xgb_tune = train(x = train.images.pca, 
+                 y = train.classes,
+                 method = "xgbTree",
+                 trControl = xgb_control,
+                 tuneGrid = xgb_grid
+)
+xgb_tune
+```
+
+![](screen_shots_fashion_mnist/xgb_tune_print_1.png)
+![](screen_shots_fashion_mnist/xgb_tune_print_2.png)
+![](screen_shots_fashion_mnist/xgb_tune_print_3.png)
+![](screen_shots_fashion_mnist/xgb_tune_print_4.png)
+
+Let's have a look at the tuning parameters resulting in the highest accuracy, and the model performance overall. 
+```{r, eval = FALSE}
+xgb_tune$results[which.max(xgb_tune$results$Accuracy), ]
+```
+
+![](screen_shots_fashion_mnist/xgb_highest_accuracy.png)
+
+
+```{r, eval = FALSE}
+mp.xgb = model_performance(xgb_tune, train.images.pca, test.images.pca, 
+                           train.classes, test.classes, "xgboost")
+```
+
+![](screen_shots_fashion_mnist/xgb_mp.png)
+
+The optimal combination of tuning parameter values resulted in 86.2% training and 85.5% testing accuracies. Although there may be some slight overfitting going on, the model performes a bit better than the random forest, as was expected. Let's have a look at the confusion matrix for the test set predictions to observe what clothing categories are mostly correctly or wrongly classified.
+
+```{r, eval = FALSE}
+table(pred = predict(xgb_tune, test.images.pca),
+      true = test.classes)
+```
+
+![](screen_shots_fashion_mnist/xgb_confusion.png)
+
+As we saw with the random forests, pullovers, shirts and coats are most often mixed up, while trousers, boots, bags and sneakers are most often correctly classified.
+
+# References 
+
+James, G., Witten, D., Hastie, T., & Tibshirani, R. (2013). An introduction to statistical learning (Vol. 112, p. 18). New York: Springer.
+
+# Next up in this series...
+
+In the next blog post of this series, we will use the PCA reduced data and `model_performance` function once more, this time to estimate and assess support vector machines. Will these models be able to achieve similar results on the reduced data as neural networks on the full data? Let's see!
