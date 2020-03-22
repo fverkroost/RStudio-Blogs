@@ -273,8 +273,9 @@ ggplot() +
 
 # Boosting - grid search for parameters with 5-fold cross-validation
 xgb_control = trainControl(
-  method = "cv",
+  method = "repeatedcv",
   number = 5,
+  repeats = 5,
   classProbs = TRUE,
   allowParallel = TRUE,
   savePredictions = TRUE
@@ -405,6 +406,26 @@ ggplot() +
 ################################################################################################
 #################################### WRAPPING EVERYTHING UP ####################################
 ################################################################################################
+
+# Data for resampled accuracies
+model_list = list(rf_rand, rf_grid, xgb_tune, svm_rand_radial, svm_grid_radial, svm_grid_linear)
+names(model_list) = c(paste0('Random forest ', c("(random ", "(grid "), "search)"), "Gradient-boosted trees", 
+                      paste0('Radial support vector machine ', c("(random ", "(grid "), "search)"), 
+                      'Linear support vector machine (grid search)')
+resamp = resamples(model_list)
+accuracy_variables = names(resamp$values)[grepl("Accuracy", names(resamp$values))]
+plotdf = melt(resamp$values[, c('Resample', accuracy_variables)], 
+              id = "Resample", value.name = "Accuracy", variable.name = "Model")
+plotdf$Model = gsub("~.*","", plotdf$Model)
+
+# Box plot of resampled accuracies
+ggplot() +
+  geom_boxplot(data = plotdf, aes(x = Model, y = Accuracy, color = Model)) +
+  ggtitle('Resampled accuracy for machine learning models estimated') + 
+  my_theme() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  labs(x = NULL, color = NULL) +
+  guides(color = FALSE)
 
 # Combine all model performance metrics for all models to obtain overview
 mp.df = rbind(mp.single.tree, mp.pruned.tree, mp.rf.rand, mp.rf.grid, mp.xgb, 
