@@ -32,7 +32,7 @@ library(rvest)
 url <- "https://www.nationsonline.org/oneworld/country_code_list.htm"
 iso_codes <- url %>%
   read_html() %>%
-  html_nodes(xpath = '//*[@id="CountryCode"]') %>%
+  html_nodes(xpath = '//*[@id="Country-Codes-A-C"]') %>%
   html_table()
 iso_codes <- iso_codes[[1]][, -1]
 iso_codes <- iso_codes[!apply(iso_codes, 1, function(x){all(x == x[1])}), ]
