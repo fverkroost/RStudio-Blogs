@@ -44,9 +44,9 @@ library(rvest)
 url <- "https://www.nationsonline.org/oneworld/country_code_list.htm"
 iso_codes <- url %>%
   read_html() %>%
-  html_nodes(xpath = '//*[@id="CountryCode"]') %>%
+  html_nodes(xpath = '//*[starts-with(@id, "Country-Codes")]|//*[starts-with(@id, "CountryCodes")]') %>%
   html_table()
-iso_codes <- iso_codes[[1]][, -1]
+iso_codes <- rbind(iso_codes[[1]][, -1],iso_codes[[2]][, -1],iso_codes[[3]][, -1],iso_codes[[4]][, -1],iso_codes[[5]][, -1],iso_codes[[6]][, -1])
 iso_codes <- iso_codes[!apply(iso_codes, 1, function(x){all(x == x[1])}), ]
 names(iso_codes) <- c("Country", "ISO2", "ISO3", "UN")
 head(iso_codes)
