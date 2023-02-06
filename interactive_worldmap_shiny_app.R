@@ -22,6 +22,7 @@ if(!require(reshape2)) install.packages("reshape2", repos = "http://cran.us.r-pr
 if(!require(shiny)) install.packages("shiny", repos = "http://cran.us.r-project.org")
 if(!require(ggiraph)) install.packages("ggiraph", repos = "http://cran.us.r-project.org")
 if(!require(RColorBrewer)) install.packages("RColorBrewer", repos = "http://cran.us.r-project.org")
+if(!require(countrycode)) install.packages("countrycode", repos = "http://cran.us.r-project.org")
 
 # Now, we can continue with loading our data. As we'll make world maps, we need a way to map our 
 # data sets to geographical data containing coordinates (longitude and latitude). As different 
@@ -41,15 +42,9 @@ if(!require(RColorBrewer)) install.packages("RColorBrewer", repos = "http://cran
 
 library(magrittr)
 library(rvest)
-url <- "https://www.nationsonline.org/oneworld/country_code_list.htm"
-iso_codes <- url %>%
-  read_html() %>%
-  html_nodes(xpath = '//*[@id="CountryCode"]') %>%
-  html_table()
-iso_codes <- iso_codes[[1]][, -1]
-iso_codes <- iso_codes[!apply(iso_codes, 1, function(x){all(x == x[1])}), ]
-names(iso_codes) <- c("Country", "ISO2", "ISO3", "UN")
-head(iso_codes)
+library(countrycode)
+iso_codes = countrycode::codelist[, c("un.name.en", "iso3c")]
+names(iso_codes) = c("Country", "ISO3")
 
 # Next, we'll collect our first data set, which is a data set on childlessness provided by the United 
 # Nations. We download the file from the link, save it locally and then load it into RStudio using the 
