@@ -15,6 +15,7 @@
 if(!require(magrittr)) install.packages("magrittr", repos = "http://cran.us.r-project.org")
 if(!require(rvest)) install.packages("rvest", repos = "http://cran.us.r-project.org")
 if(!require(readxl)) install.packages("readxl", repos = "http://cran.us.r-project.org")
+if(!require(plyr)) install.packages("plyr", repos = "http://cran.us.r-project.org")
 if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
 if(!require(maps)) install.packages("maps", repos = "http://cran.us.r-project.org")
 if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
@@ -23,6 +24,7 @@ if(!require(shiny)) install.packages("shiny", repos = "http://cran.us.r-project.
 if(!require(ggiraph)) install.packages("ggiraph", repos = "http://cran.us.r-project.org")
 if(!require(RColorBrewer)) install.packages("RColorBrewer", repos = "http://cran.us.r-project.org")
 if(!require(countrycode)) install.packages("countrycode", repos = "http://cran.us.r-project.org")
+if(!require(wbstats)) install.packages("wbstats", repos = "http://cran.us.r-project.org")
 
 # Now, we can continue with loading our data. As we'll make world maps, we need a way to map our 
 # data sets to geographical data containing coordinates (longitude and latitude). As different 
@@ -69,23 +71,73 @@ names(childlessness_data) <- c("Country", "Period", "35-39", "40-44", "45-49")
 head(childlessness_data)
 
 # Our second data set is about measures of gender inequality, provided by the World Bank. We read this 
-# .csv file directly into RStudio from the URL link.
-
-gender_index_data <- read.csv("https://s3.amazonaws.com/datascope-ast-datasets-nov29/datasets/743/data.csv")
-head(gender_index_data)
-
-# Luckily, these data are better structured than the childlessness data. The data contains gender inequality 
-# measures per year, and for convenience we add a new column with the values for the most recent year for 
-# which data are available. In this blog, we'll only look at the rank indicators rather than indices and 
-# normalized scores. We drop the Subindicator and IndicatorID columns using the *select()* function from 
-# the *dplyr* package, as we won't need these further.
-
+# .csv file directly into RStudio from the API provided by the World Bank via package "wbstats".
+library(wbstats)
+library(plyr)
 library(dplyr)
-gender_index_data["RecentYear"] <- apply(gender_index_data, 1, function(x){as.numeric(x[max(which(!is.na(x)))])})
-gender_index_data <- gender_index_data[gender_index_data$Subindicator.Type == "Rank", ] %>% 
-  select(-Subindicator.Type, -Indicator.Id)
-names(gender_index_data) <- c("ISO3", "Country", "Indicator", as.character(c(2006:2016, 2018)), "RecentYear")
-head(gender_index_data)
+library(wbstats)
+library(plyr)
+library(dplyr)
+
+# List the gender-relevant data sets from the World Bank
+datasets = wb_search("gender", fields = c("indicator"))
+
+# Try to load these relevant data sets into R
+df_list = list()
+for (i in 1:nrow(datasets)){
+  print(i)
+  df_list[[i]] <- tryCatch(
+    { df = wb_data(datasets$indicator_id[i], start_date = 2000, end_date = 2020) },
+    error=function(cond) { return(NULL) }
+  )    
+}
+
+# Remove the NULL data sets (returning an error from the World Bank API)
+df_list = df_list[which(!unlist(lapply(df_list, is.null)))]
+
+# Define the identification columns
+id.cols = c("iso2c", "iso3c", "country", "date","unit", "obs_status", "footnote", "last_updated")
+
+# Make sure the gender index data for each indicator are in a
+# similar format as the other data to be used (as well as
+# previous versions of these data)
+recent_df_list = list()
+for (i in 1:length(df_list)){
+  
+  # Rename columns into relevant names
+  ind_idx = !names(df_list[[i]]) %in% id.cols
+  ind_nam = names(df_list[[i]])[ind_idx]
+  df_list[[i]]["Indicator"] = ind_nam
+  names(df_list[[i]])[ind_idx] = "Value"
+  missing_cols = id.cols[!id.cols %in% names(df_list[[i]])]
+  if (length(missing_cols) > 0){ 
+    for (j in 1:length(missing_cols)){
+      df_list[[i]][missing_cols[j]] = NA
+    }
+  }
+  
+  # Add the most recent observations separately
+  recent_rows = as.data.frame(df_list[[i]] %>%
+                                dplyr::filter(!is.na(Value) & !is.na(date)) %>%
+                                dplyr::group_by(iso3c) %>%
+                                dplyr::arrange(date, .by_group = T) %>%
+                                dplyr::slice(tail(row_number(), 1)))
+  if (nrow(recent_rows) > 0){
+    recent_rows["date"] = "RecentYear"
+    df_list[[i]]$date = as.character(df_list[[i]]$date)
+    recent_df_list[[i]] = rbind(as.data.frame(df_list[[i]]), recent_rows)
+  }
+}
+
+# Rename columns to make them compatible with childlessness data
+# and previous versions of these gender index data
+gender_index_melt = rbind.fill(recent_df_list)
+gender_index_melt$Indicator = datasets$indicator[match(gender_index_melt$Indicator, datasets$indicator_id)]
+names(gender_index_melt)[names(gender_index_melt) == "country"] = "Country"
+names(gender_index_melt)[names(gender_index_melt) == "iso3c"] = "ISO3"
+names(gender_index_melt)[names(gender_index_melt) == "date"] = "Period"
+keep_cols = c("ISO3", "Country", "Period", "Indicator", "Value")
+gender_index_melt = gender_index_melt[, names(gender_index_melt) %in% keep_cols]
 
 # Next, we load in our world data with geograpical coordinates directly from package *ggplot2*. These data 
 # contain geographical coordinates of all countries worldwide, which we'll later need to plot the worldmaps.
@@ -162,8 +214,6 @@ library(reshape2)
 childlessness_melt <- melt(childlessness_data, id = c("Country", "ISO3", "Period"), 
                            variable.name = "Indicator", value.name = "Value")
 childlessness_melt$Value <- as.numeric(childlessness_melt$Value)
-gender_index_melt <- melt(gender_index_data, id = c("ISO3", "Country", "Indicator"), 
-                          variable.name = "Period", value.name = "Value")
 
 # After melting the data and ensuring they're in the same format, we merge them together using the *rbind()* 
 # function, which we can do here because the data have the same colum names.
